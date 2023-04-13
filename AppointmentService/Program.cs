@@ -15,6 +15,7 @@ namespace AppointmentService
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+            string? dbConnStr = Environment.GetEnvironmentVariable("DATABASE_CONNECTION_STRING");
 
             // Add services to the container.
             builder.Services.AddAuthorization();
@@ -30,27 +31,22 @@ namespace AppointmentService
                 c.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, xmlFilename));
             });
 
-            if (string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("DefaultConnection")))
+            builder.Services.AddDbContext<AppointmentDb>(options =>
             {
-                builder.Services.AddDbContext<AppointmentDb>(opt =>
+                options.UseSqlServer(dbConnStr != null ? dbConnStr : builder.Configuration.GetConnectionString("DefaultConnection"), sqlOptions =>
                 {
-                    opt.UseInMemoryDatabase("Appointments");
+                    sqlOptions.EnableRetryOnFailure();
                 });
-            }
-            else
-            {
-                builder.Services.AddDbContext<AppointmentDb>(options =>
-                {
-                    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"), sqlOptions =>
-                    {
-                        sqlOptions.EnableRetryOnFailure();
-                    });
-                });
-            }
+            });
 
             builder.Services.AddDatabaseDeveloperPageExceptionFilter();
 
             var app = builder.Build();
+            using (var scope = app.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppointmentDb>();
+                db.Database.Migrate();
+            }
 
             // Configure the HTTP request pipeline.
             if (app.Environment.IsDevelopment())
@@ -74,10 +70,10 @@ namespace AppointmentService
     {
         public static void MapAppointmentRoutes(this IEndpointRouteBuilder app)
         {
-            app.MapGet   ("/v1/appointments", GetAppointmentSearch);
-            app.MapPost  ("/v1/appointments", PostAppointment);
-            app.MapGet   ("/v1/appointments/{appointment_id}", GetAppointment);
-            app.MapPut   ("/v1/appointments/{appointment_id}", PutAppointment);
+            app.MapGet("/v1/appointments", GetAppointmentSearch);
+            app.MapPost("/v1/appointments", PostAppointment);
+            app.MapGet("/v1/appointments/{appointment_id}", GetAppointment);
+            app.MapPut("/v1/appointments/{appointment_id}", PutAppointment);
             app.MapDelete("/v1/appointments/{appointment_id}", DeleteAppointment);
         }
 
@@ -98,7 +94,7 @@ namespace AppointmentService
         /// <param name="offset">The offset of elements to return</param>
         /// <response code="200">Success</response>
         /// <response code="409">This appointment conflicts with another already scheduled by one or more participants</response>
-        public static async Task<ICollection<Appointment>> GetAppointmentSearch(AppointmentDb db, Guid? participant_id, string? location, int? num_participants, 
+        public static async Task<ICollection<Appointment>> GetAppointmentSearch(AppointmentDb db, Guid? participant_id, string? location, int? num_participants,
             TimeSpan? expected_duration, DateTime? from, DateTime? to, AppointmentStatus? status, int limit = 50, int offset = 0)
         {
             if (from == null) from = DateTime.MinValue;
@@ -202,7 +198,7 @@ namespace AppointmentService
             if (inAppointment.Recurring) appointment.RecurringFrequency = inAppointment.RecurringFrequency;
             else appointment.RecurringFrequency = null;
 
-            if(inAppointment.Participants == null) appointment.NumParticipants = 0;
+            if (inAppointment.Participants == null) appointment.NumParticipants = 0;
             else appointment.NumParticipants = inAppointment.Participants.Count;
 
             iCal.UpdateiCalData(appointment);
