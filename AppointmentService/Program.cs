@@ -56,8 +56,6 @@ namespace AppointmentService
                 app.UseDeveloperExceptionPage();
             }
 
-            app.UseHttpsRedirection();
-
             app.UseAuthorization();
 
             app.MapAppointmentRoutes();
